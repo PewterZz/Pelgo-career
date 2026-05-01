@@ -1,0 +1,139 @@
+{
+  "_type": "export",
+  "__export_format": 4,
+  "__export_date": "2026-05-01T00:00:00.000Z",
+  "__export_source": "insomnia.importers",
+  "resources": [
+    {
+      "_id": "wrk_pelgo",
+      "_type": "workspace",
+      "name": "Pelgo Career System",
+      "description": "API endpoints for the Pelgo Career System",
+      "scope": "collection",
+      "parentId": null
+    },
+    {
+      "_id": "env_base",
+      "_type": "environment",
+      "name": "Base Environment",
+      "parentId": "wrk_pelgo",
+      "data": {
+        "base_url": "http://localhost:8001/api/v1"
+      }
+    },
+    {
+      "_id": "fld_candidates",
+      "_type": "request_group",
+      "name": "Candidates",
+      "parentId": "wrk_pelgo"
+    },
+    {
+      "_id": "fld_matches",
+      "_type": "request_group",
+      "name": "Matches",
+      "parentId": "wrk_pelgo"
+    },
+    {
+      "_id": "fld_admin",
+      "_type": "request_group",
+      "name": "Admin",
+      "parentId": "wrk_pelgo"
+    },
+    {
+      "_id": "req_ingest_candidate_json",
+      "_type": "request",
+      "name": "Ingest Candidate (JSON)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/candidate",
+      "parentId": "fld_candidates",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"resume_text\": \"Jane Smith is a senior software engineer with 8 years of experience in Python, FastAPI, and distributed systems. She has led teams at multiple startups and has deep expertise in microservices architecture, PostgreSQL, Redis, and AWS. She holds a BS in Computer Science from MIT.\"\n}"
+      }
+    },
+    {
+      "_id": "req_ingest_candidate_pdf",
+      "_type": "request",
+      "name": "Ingest Candidate (PDF Upload)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/candidate",
+      "parentId": "fld_candidates",
+      "headers": [],
+      "body": {
+        "mimeType": "multipart/form-data",
+        "params": [
+          {
+            "name": "file",
+            "type": "file",
+            "fileName": "",
+            "value": ""
+          }
+        ]
+      }
+    },
+    {
+      "_id": "req_submit_matches",
+      "_type": "request",
+      "name": "Submit Match Jobs",
+      "method": "POST",
+      "url": "{{ _.base_url }}/matches",
+      "parentId": "fld_matches",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"candidate_id\": \"PASTE_CANDIDATE_ID_HERE\",\n  \"jds\": [\n    \"We are looking for a senior backend engineer with 5+ years of experience in Python and cloud infrastructure. Must have experience with PostgreSQL and containerization.\",\n    \"Seeking a full-stack developer proficient in React and Node.js with experience building scalable web applications.\"\n  ]\n}"
+      }
+    },
+    {
+      "_id": "req_get_match_job",
+      "_type": "request",
+      "name": "Get Match Job by ID",
+      "method": "GET",
+      "url": "{{ _.base_url }}/matches/PASTE_JOB_ID_HERE",
+      "parentId": "fld_matches",
+      "headers": [],
+      "body": {}
+    },
+    {
+      "_id": "req_list_matches",
+      "_type": "request",
+      "name": "List Match Jobs",
+      "method": "GET",
+      "url": "{{ _.base_url }}/matches?limit=10&offset=0",
+      "parentId": "fld_matches",
+      "headers": [],
+      "body": {}
+    },
+    {
+      "_id": "req_list_matches_filtered",
+      "_type": "request",
+      "name": "List Match Jobs (Filter by Status)",
+      "method": "GET",
+      "url": "{{ _.base_url }}/matches?status=completed&limit=10&offset=0",
+      "parentId": "fld_matches",
+      "headers": [],
+      "body": {}
+    },
+    {
+      "_id": "req_requeue_job",
+      "_type": "request",
+      "name": "Requeue Match Job",
+      "method": "POST",
+      "url": "{{ _.base_url }}/admin/matches/PASTE_JOB_ID_HERE/requeue",
+      "parentId": "fld_admin",
+      "headers": [],
+      "body": {}
+    }
+  ]
+}
