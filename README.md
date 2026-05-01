@@ -13,6 +13,11 @@ full prompts are located in the /prompts folder
 - 3. What counts as a failed tool call: timeouts, schema violations, and empty results are all failures. Timeouts skip and move on, schema errors retry once, empty results downgrade confidence. Nothing crashes the run.
 - 4. JD caching: each candidate run extracts the job description independently. Skill resource lookups are cached per worker process so repeated skills aren't re-fetched.
 - 5. Candidate profile fields: skills, years_experience, seniority_level, domain, work_history, education. Scoring uses skills for match ratio, years for experience, seniority for fit, and domain for a confidence penalty on cross-domain transitions.
+ 
+  Notable tradeoffs:
+  - could've run gemini calls in parallel to reduce latency for the research part but decided to keep them sequential for simplicity.
+  - perfect matches, dont return anything substantial to learn from quite yet, only weak or mediocre resumes get a proper study plan.
+  - gemini from google can still be a littl non deterministic on its own, so some judgements from resume parsing or output can be slightly different.
 
 ---
 
