@@ -1,0 +1,79 @@
+╭─── Claude Code v2.1.97 ──────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting        │
+│                 Welcome back Peter!                │ started                 │
+│                                                    │ Run /init to create a … │
+│                       ▐▛███▜▌                      │ ─────────────────────── │
+│                      ▝▜█████▛▘                     │ Recent activity         │
+│                        ▘▘ ▝▝                       │ No recent activity      │
+│        Opus 4.6 (1M context) · Claude Max ·        │                         │
+│        peterns1609@gmail.com's Organization        │                         │
+│           ~/Projects/pelgo-career-system           │                         │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+❯ check the pelgo pdf in ~/Downloads and see if we have done everything here    
+
+  Searched for 3 patterns, listed 1 directory (ctrl+o to expand)
+
+● Found it. Let me read the PDF.
+
+  Read 1 file (ctrl+o to expand)
+
+● Let me explore the codebase to check each requirement against what's been
+  built.
+
+● Explore(Audit codebase vs assignment)
+  ⎿  Done (34 tool uses · 81.6k tokens · 1m 35s)
+  (ctrl+o to expand)
+
+● Here's the summary of where you stand against the assignment:
+
+  Checklist Status
+
+  ┌─────────────────────────────────────────────────────────────┬───────────┐
+  │                         Requirement                         │  Status   │
+  ├─────────────────────────────────────────────────────────────┼───────────┤
+  │ A1 Typed state, runtime tool sequencing, interruptible      │ ✅ Done   │
+  ├─────────────────────────────────────────────────────────────┼───────────┤
+  │ A2 4 required tools + real external calls + caching         │ ✅ Done   │
+  ├─────────────────────────────────────────────────────────────┼───────────┤
+  │ A2 Google ADK stretch tool                                  │ ✅ Done   │
+  ├─────────────────────────────────────────────────────────────┼───────────┤
+  │ A3 Output schema with orchestrator-injected agent_trace     │ ✅ Done   │
+  ├─────────────────────────────────────────────────────────────┼───────────┤
+  │ A4 3 failure modes (timeout, invalid output, low            │ ✅ Done   │
+  │ confidence)                                                 │           │
+  ├─────────────────────────────────────────────────────────────┼───────────┤
+  │ A5 README (system prompt, framework, confidence heuristic,  │ ✅ Done   │
+  │ trade-offs)                                                 │           │
+  ├─────────────────────────────────────────────────────────────┼───────────┤
+  │ B1 4 API endpoints                                          │ ✅ Done   │
+  ├─────────────────────────────────────────────────────────────┼───────────┤
+  │ B2 Out-of-process workers, race-safe, 3-fail dead-letter    │ ✅ Done   │
+  ├─────────────────────────────────────────────────────────────┼───────────┤
+  │ B3 PostgreSQL + Alembic migrations + seed script + JSONB    │ ✅ Done   │
+  ├─────────────────────────────────────────────────────────────┼───────────┤
+  │ Integration test (full lifecycle)                           │ ✅ Done   │
+  ├─────────────────────────────────────────────────────────────┼───────────┤
+  │ docker-compose full stack                                   │ ✅ Done   │
+  ├─────────────────────────────────────────────────────────────┼───────────┤
+  │ Structured logging                                          │ ✅ Done   │
+  ├─────────────────────────────────────────────────────────────┼───────────┤
+  │ Typed Python (Pydantic throughout)                          │ ✅ Done   │
+  ├─────────────────────────────────────────────────────────────┼───────────┤
+  │ Admin re-queue endpoint                                     │ ✅ Done   │
+  ├─────────────────────────────────────────────────────────────┼───────────┤
+  │ Schema validation before persisting                         │ ✅ Done   │
+  ├─────────────────────────────────────────────────────────────┼───────────┤
+  │ Minimal frontend                                            │ ❌        │
+  │                                                             │ Missing   │
+  └─────────────────────────────────────────────────────────────┴───────────┘
+
+  The One Gap: Frontend
+
+  The spec calls for "A minimal frontend: candidate upload, JD submission, 
+  polling results with async state display." You don't have one — no
+  HTML/React/anything serving a UI. The API is fully functional, so this would
+  be a thin layer on top, but it's explicitly in the submission checklist.
+
+  Everything else looks solid. Want me to build a minimal frontend to close that
+   gap?
