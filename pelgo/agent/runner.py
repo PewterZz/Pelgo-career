@@ -73,80 +73,87 @@ class AgentRunner:
         import os as _os
         _debug = _os.getenv("PELGO_DEBUG") == "1"
 
-        async for event in self._runner.run_async(
-            user_id=_USER_ID,
-            session_id=session_id,
-            new_message=types.Content(
-                role="user",
-                parts=[types.Part(text=message)],
-            ),
-        ):
-            if _debug:
-                parts_summary = []
-                if event.content and event.content.parts:
-                    for p in event.content.parts:
-                        if hasattr(p, "text") and p.text:
-                            parts_summary.append(f"text={p.text[:80]!r}")
-                        elif hasattr(p, "function_call") and p.function_call:
-                            fc_args_str = json.dumps(p.function_call.args)[:200]
-                            parts_summary.append(f"fc={p.function_call.name} args={fc_args_str}")
-                        elif hasattr(p, "function_response") and p.function_response:
-                            fr_resp_str = json.dumps(p.function_response.response)[:300]
-                            parts_summary.append(f"fr={p.function_response.name} resp={fr_resp_str}")
-                no_content = not event.content or not event.content.parts
-                print(f"[event] author={event.author} final={event.is_final_response()} content={'EMPTY' if no_content else 'ok'} parts=[{', '.join(parts_summary)}]", flush=True)
-                if event.is_final_response() and no_content:
-                    attrs = {k: v for k, v in vars(event).items() if k in ("finish_reason", "error_code", "error_message") and v is not None}
-                    print(f"[event] WARNING: empty final event — agent stopped. {attrs}", flush=True)
+        try:
+          async for event in self._runner.run_async(
+              user_id=_USER_ID,
+              session_id=session_id,
+              new_message=types.Content(
+                  role="user",
+                  parts=[types.Part(text=message)],
+              ),
+          ):
+              if _debug:
+                  parts_summary = []
+                  if event.content and event.content.parts:
+                      for p in event.content.parts:
+                          if hasattr(p, "text") and p.text:
+                              parts_summary.append(f"text={p.text[:80]!r}")
+                          elif hasattr(p, "function_call") and p.function_call:
+                              fc_args_str = json.dumps(p.function_call.args)[:200]
+                              parts_summary.append(f"fc={p.function_call.name} args={fc_args_str}")
+                          elif hasattr(p, "function_response") and p.function_response:
+                              fr_resp_str = json.dumps(p.function_response.response)[:300]
+                              parts_summary.append(f"fr={p.function_response.name} resp={fr_resp_str}")
+                  no_content = not event.content or not event.content.parts
+                  print(f"[event] author={event.author} final={event.is_final_response()} content={'EMPTY' if no_content else 'ok'} parts=[{', '.join(parts_summary)}]", flush=True)
+                  if event.is_final_response() and no_content:
+                      attrs = {k: v for k, v in vars(event).items() if k in ("finish_reason", "error_code", "error_message") and v is not None}
+                      print(f"[event] WARNING: empty final event — agent stopped. {attrs}", flush=True)
 
-            for fc in event.get_function_calls():
-                pending_call_times[fc.id] = time.monotonic()
-                log("tool_call_start", job_id=job_id, tool=fc.name)
+              for fc in event.get_function_calls():
+                  pending_call_times[fc.id] = time.monotonic()
+                  log("tool_call_start", job_id=job_id, tool=fc.name)
 
-            for fr in event.get_function_responses():
-                start = pending_call_times.pop(fr.id, time.monotonic())
-                latency_ms = int((time.monotonic() - start) * 1000)
-                response_data = fr.response or {}
-                status = "error" if "error" in response_data else "success"
-                trace.tool_calls.append(
-                    ToolCallRecord(
-                        tool=fr.name,
-                        status=status,
-                        latency_ms=latency_ms,
-                    )
-                )
-                if status == "error":
-                    trace.fallbacks_triggered += 1
-                log("tool_call_end", job_id=job_id, tool=fr.name, status=status, latency_ms=latency_ms,
-                    level="error" if status == "error" else "info")
+              for fr in event.get_function_responses():
+                  start = pending_call_times.pop(fr.id, time.monotonic())
+                  latency_ms = int((time.monotonic() - start) * 1000)
+                  response_data = fr.response or {}
+                  status = "error" if "error" in response_data else "success"
+                  trace.tool_calls.append(
+                      ToolCallRecord(
+                          tool=fr.name,
+                          status=status,
+                          latency_ms=latency_ms,
+                      )
+                  )
+                  if status == "error":
+                      trace.fallbacks_triggered += 1
+                  log("tool_call_end", job_id=job_id, tool=fr.name, status=status, latency_ms=latency_ms,
+                      level="error" if status == "error" else "info")
 
-            if event.usage_metadata:
-                llm_call_count += 1
-                meta = event.usage_metadata
-                log("llm_usage", job_id=job_id, llm_call_n=llm_call_count,
-                    prompt_tokens=getattr(meta, "prompt_token_count", None),
-                    candidates_tokens=getattr(meta, "candidates_token_count", None),
-                    total_tokens=getattr(meta, "total_token_count", None))
+              if event.usage_metadata:
+                  llm_call_count += 1
+                  meta = event.usage_metadata
+                  log("llm_usage", job_id=job_id, llm_call_n=llm_call_count,
+                      prompt_tokens=getattr(meta, "prompt_token_count", None),
+                      candidates_tokens=getattr(meta, "candidates_token_count", None),
+                      total_tokens=getattr(meta, "total_token_count", None))
 
-            if event.is_final_response() and event.content and final_result is None:
-                raw_text = _extract_text(event)
-                # Only capture if the response contains JSON — intermediate text
-                # events (LLM "thinking" steps) have no braces and must be skipped
-                # so the agent can continue calling tools and produce real output.
-                if "{" in raw_text and "}" in raw_text:
-                    trace.total_llm_calls = llm_call_count
-                    final_result = _parse_and_validate(raw_text, job_id, trace)
+              if event.is_final_response() and event.content and final_result is None:
+                  raw_text = _extract_text(event)
+                  # Only capture if the response contains JSON — intermediate text
+                  # events (LLM "thinking" steps) have no braces and must be skipped
+                  # so the agent can continue calling tools and produce real output.
+                  if "{" in raw_text and "}" in raw_text:
+                      trace.total_llm_calls = llm_call_count
+                      final_result = _parse_and_validate(raw_text, job_id, trace)
 
-                    session_obj = await self._session_service.get_session(
-                        app_name="pelgo",
-                        user_id=_USER_ID,
-                        session_id=session_id,
-                    )
-                    agent_state_dict = session_obj.state if session_obj else {}
-                    _enrich_result_from_state(final_result, agent_state_dict)
-                # Do NOT return here — let the generator exhaust itself so ADK's
-                # ContextVar context managers can detach cleanly. Returning early
-                # triggers GeneratorExit which corrupts the async context chain.
+                      session_obj = await self._session_service.get_session(
+                          app_name="pelgo",
+                          user_id=_USER_ID,
+                          session_id=session_id,
+                      )
+                      agent_state_dict = session_obj.state if session_obj else {}
+                      _enrich_result_from_state(final_result, agent_state_dict)
+                  # Do NOT return here — let the generator exhaust itself so ADK's
+                  # ContextVar context managers can detach cleanly. Returning early
+                  # triggers GeneratorExit which corrupts the async context chain.
+        except (ValueError, Exception) as exc:
+            # ADK raises ValueError when Gemini hallucinates a tool name that
+            # isn't registered. Catch it so the run degrades gracefully instead
+            # of crashing. Return the best result collected so far.
+            log("agent_error", job_id=job_id, error=str(exc), level="warn")
+            trace.fallbacks_triggered += 1
 
         trace.total_llm_calls = llm_call_count
         total_ms = int((time.monotonic() - run_start) * 1000)

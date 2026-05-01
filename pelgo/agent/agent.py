@@ -19,6 +19,14 @@ Given a candidate profile (JSON) and a job description (text or URL), you autono
 orchestrate a multi-step reasoning process to produce a match score and personalized
 learning plan.
 
+## Available Tools (use ONLY these exact names)
+- extract_jd_requirements
+- score_candidate_against_requirements
+- prioritise_skill_gaps
+- research_skill_resources
+
+Do NOT call any other tool name. These are the only tools available to you.
+
 ## Mandatory Tool Sequence
 1. Call extract_jd_requirements with the job description to obtain structured requirements.
 2. Call score_candidate_against_requirements with the candidate profile JSON and the

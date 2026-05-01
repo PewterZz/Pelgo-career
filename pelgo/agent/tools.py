@@ -359,7 +359,7 @@ Rank all {len(gap_skills)} skills.
 # sub-agent, which uses its own FunctionTools to fetch and curate results.
 
 
-async def _coursera_search(skill_name: str) -> dict[str, Any]:
+async def coursera_search(skill_name: str) -> dict[str, Any]:
     """Fetch up to 5 Coursera courses matching skill_name via the public API."""
     results: list[dict] = []
     try:
@@ -383,7 +383,7 @@ async def _coursera_search(skill_name: str) -> dict[str, Any]:
     return {"results": results}
 
 
-async def _github_search(skill_name: str) -> dict[str, Any]:
+async def github_search(skill_name: str) -> dict[str, Any]:
     """Search GitHub for awesome lists and tutorial repos for a skill.
 
     Uses the unauthenticated public API (60 req/hr). Set GITHUB_TOKEN in .env
@@ -432,7 +432,7 @@ _HF_KNOWN_COURSES: dict[str, tuple[str, str, int]] = {
 }
 
 
-async def _huggingface_search(skill_name: str) -> dict[str, Any]:
+async def huggingface_search(skill_name: str) -> dict[str, Any]:
     """Search HuggingFace for datasets and check known free course URLs."""
     results: list[dict] = []
 
@@ -471,7 +471,7 @@ async def _huggingface_search(skill_name: str) -> dict[str, Any]:
     return {"results": results}
 
 
-async def _ddg_search(skill_name: str, seniority_context: str = "mid") -> dict[str, Any]:
+async def ddg_search(skill_name: str, seniority_context: str = "mid") -> dict[str, Any]:
     """Search DuckDuckGo Instant Answers for learning resources (last-resort fallback)."""
     results: list[dict] = []
     try:
@@ -502,18 +502,29 @@ async def _ddg_search(skill_name: str, seniority_context: str = "mid") -> dict[s
 
 _SKILL_RESEARCH_SUB_AGENT = LlmAgent(
     name="research_skill_resources",
-    model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
-    generate_content_config=genai_types.GenerateContentConfig(temperature=0.0),
+    model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+    generate_content_config=genai_types.GenerateContentConfig(
+        temperature=0.0,
+        thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
+    ),
     instruction="""\
-You are a Skill Resource Researcher. Given a request with a skill name and seniority level:
+You are a Skill Resource Researcher. Given a request with a skill name and seniority level,
+call the tools below to find learning resources.
 
-1. Call coursera_search — structured online courses.
-2. Call github_search — curated awesome lists and tutorial repos ranked by GitHub stars.
-3. Call huggingface_search — free HuggingFace courses (best for ML/AI skills) and datasets.
-4. If all three return empty results, call ddg_search as a last-resort fallback.
+## Available Tools (use ONLY these exact names)
+- coursera_search
+- github_search
+- huggingface_search
+- ddg_search
+
+Do NOT call any other tool name. These are the only tools available to you.
+
+## Steps
+1. Call coursera_search with the skill name.
+2. Call github_search with the skill name.
+3. Call huggingface_search with the skill name.
+4. If all three returned empty results, call ddg_search as a last-resort fallback.
 5. Merge, deduplicate by URL, and rank all results by relevance_score descending.
-   Adjust relevance_score (0.0–1.0) upward for resources that closely match the
-   seniority level and downward for generic or off-topic results.
 6. Return ONLY a valid JSON object — no prose before or after:
 {
   "skill": "<skill_name>",
@@ -530,10 +541,10 @@ You are a Skill Resource Researcher. Given a request with a skill name and senio
 If no resources are found from any source, include one Google search fallback resource.
 """,
     tools=[
-        FunctionTool(_coursera_search),
-        FunctionTool(_github_search),
-        FunctionTool(_huggingface_search),
-        FunctionTool(_ddg_search),
+        FunctionTool(coursera_search),
+        FunctionTool(github_search),
+        FunctionTool(huggingface_search),
+        FunctionTool(ddg_search),
     ],
 )
 
