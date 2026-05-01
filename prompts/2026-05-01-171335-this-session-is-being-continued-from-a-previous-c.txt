@@ -1,0 +1,112 @@
+╭─── Claude Code v2.1.126 ─────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting        │
+│                 Welcome back Peter!                │ started                 │
+│                                                    │ Run /init to create a … │
+│                       ▐▛███▜▌                      │ ─────────────────────── │
+│                      ▝▜█████▛▘                     │ What's new              │
+│                        ▘▘ ▝▝                       │ The `/model` picker no… │
+│ Sonnet 4.6 · Claude Max · peterns1609@gmail.com's  │ - Added `claude projec… │
+│ Organization                                       │ `--dangerously-skip-pe… │
+│                  ~/Projects/Pelgo                  │ /release-notes for more │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+✻ Conversation compacted (ctrl+o for history)
+
+  ⎿  Read pelgo/api/routes/candidates.py (61 lines)
+  ⎿  Read tests/test_integration.py (271 lines)
+  ⎿  Read .env.example (16 lines)
+  ⎿  Read pytest.ini (3 lines)
+  ⎿  Read requirements.txt (20 lines)
+  ⎿  Plan file referenced (~/.claude/plans/hey-i-need-you-bright-tulip.md)
+
+  Read 2 files (ctrl+o to expand)
+
+⏺ Two changes needed: add empty trace fallback in mark_failed, and mock
+  _gemini_seniority in the integration tests.
+
+⏺ Update(pelgo/db/repository.py)
+  ⎿  Added 2 lines, removed 2 lines
+      123  ) -> None:
+      124      now = datetime.now(timezone.utc)
+      125      if attempt_count >= 3:
+      126 +        trace = partial_trace or {"tool_calls": [], "total_llm
+          +_calls": 0, "fallbacks_triggered": 0}                         
+      127          values = {
+      128              "status": "failed",
+      129              "error_detail": error,
+      130 +            "result": {"agent_trace": trace},                 
+      131              "updated_at": now,
+      132          }
+      131 -        if partial_trace:                                     
+      132 -            values["result"] = {"agent_trace": partial_trace} 
+      133      else:
+      134          values = {
+      135              "status": "pending",
+
+⏺ Now add the _gemini_seniority mock to the integration test file. I'll add it
+  as an autouse function-scoped fixture so every test in the module benefits.
+
+⏺ Update(tests/test_integration.py)
+  ⎿  Added 1 line, removed 1 line
+       8  
+       9  import pytest
+      10  from httpx import ASGITransport, AsyncClient
+      11 -from unittest.mock import AsyncMock                            
+      11 +from unittest.mock import AsyncMock, patch                     
+      12  
+      13  
+      14  def _docker_available() -> bool:
+
+⏺ Update(tests/test_integration.py)
+  ⎿  Added 11 lines
+      28  
+      29  
+      30  # -------------------------------------------------------------
+          --------------
+      31 +# Patch _gemini_seniority so candidate ingest never calls real 
+         +Gemini                                                         
+      32 +# -------------------------------------------------------------
+         +--------------                                                 
+      33 +                                                               
+      34 +                                                               
+      35 +@pytest.fixture(autouse=True)                                  
+      36 +def mock_gemini_seniority():                                   
+      37 +    with patch("pelgo.pdf_extractor._gemini_seniority", return_
+         +value="senior"):                                               
+      38 +        yield                                                  
+      39 +                                                               
+      40 +                                                               
+      41 +# -------------------------------------------------------------
+         +--------------                                                 
+      42  # Session-scoped Postgres container + Alembic migration
+      43  # -------------------------------------------------------------
+          --------------
+      44  
+
+⏺ Now verify both edits look correct:
+
+  Read 2 files (ctrl+o to expand)
+
+⏺ Both fixes are in place. Let me do a quick smoke test to confirm nothing is
+  broken at the import level:
+
+⏺ Bash(/opt/anaconda3/bin/python -c "from pelgo.db.repository import
+      mark_failed; from pelgo.api.routes.candidates import router;
+      print('imports OK')")
+  ⎿  imports OK
+
+⏺ Both fixes are done:
+
+  1. pelgo/db/repository.py — mark_failed now always writes a result column with
+   a minimal empty trace when a job is permanently failed (attempt_count >= 3),
+  even if no partial_trace was captured.
+  2. tests/test_integration.py — Added an autouse fixture that patches
+  pelgo.pdf_extractor._gemini_seniority to return "senior" for every test in the
+   module, so the candidate ingest step never makes a real Gemini API call.
+
+  When Docker is available, run pytest tests/test_integration.py -v to confirm
+  the full end-to-end flow.
+
+✻ Baked for 24m 37s
+
+※ recap: Built the async API/worker/DB infrastructure for Part B. All implementation is complete — run pytest tests/test_integration.py -v with Docker running to verify end-to-end. (disable recaps in /config)
