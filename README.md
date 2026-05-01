@@ -17,7 +17,7 @@ full prompts are located in the /prompts folder
   Notable tradeoffs:
   - could've run gemini calls in parallel to reduce latency for the research part but decided to keep them sequential for simplicity.
   - perfect matches, dont return anything substantial to learn from quite yet, only weak or mediocre resumes get a proper study plan.
-  - gemini from google can still be a littl non deterministic on its own, so some judgements from resume parsing or output can be slightly different.
+  - gemini from google can still be a little non deterministic on its own even after prompt enforcements or temperature tweaks, so some judgements from resume parsing or output can be slightly different.
 
 ---
 
