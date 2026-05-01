@@ -45,6 +45,7 @@ class SkillResource(BaseModel):
     url: str
     estimated_hours: int = 10
     type: Literal["course", "project", "cert", "doc", "search"] = "doc"
+    relevance_score: float = Field(default=0.0, ge=0.0, le=1.0)
 
     @field_validator("estimated_hours", mode="before")
     @classmethod

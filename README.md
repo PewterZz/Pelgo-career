@@ -258,6 +258,22 @@ If `score_candidate_against_requirements` returns `confidence: "low"`, the syste
 
 ---
 
+## Structured Logging
+
+Every agent run emits JSON lines to stderr. Each line is a self-contained record:
+
+```
+{"ts": "2026-05-01T15:00:00Z", "level": "info", "event": "job_start",      "job_id": "...", "candidate": "Alex Kim"}
+{"ts": "...",                   "level": "info", "event": "tool_call_start", "job_id": "...", "tool": "extract_jd_requirements"}
+{"ts": "...",                   "level": "info", "event": "tool_call_end",   "job_id": "...", "tool": "extract_jd_requirements", "status": "success", "latency_ms": 340}
+{"ts": "...",                   "level": "info", "event": "llm_usage",       "job_id": "...", "llm_call_n": 1, "prompt_tokens": 812, "candidates_tokens": 204, "total_tokens": 1016}
+{"ts": "...",                   "level": "info", "event": "job_complete",    "job_id": "...", "status": "completed", "score": 82, "confidence": "high", "total_llm_calls": 4, "fallbacks": 0, "total_ms": 18420}
+```
+
+Fields covered: `job_id`, `tool` name, call `status` (success/error), `latency_ms` per tool, `prompt_tokens` / `candidates_tokens` / `total_tokens` per LLM call, final `score`, `confidence`, and run `total_ms`. The logger lives in `pelgo/logging.py` and writes to stderr so it doesn't pollute stdout JSON output.
+
+---
+
 ## Part B — Status
 
 Part B (FastAPI, PostgreSQL, background workers, docker-compose, frontend) is not yet implemented. The agent runs end-to-end via CLI. The submission checklist items for Part B will be added before the deadline.

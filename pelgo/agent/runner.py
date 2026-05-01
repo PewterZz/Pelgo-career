@@ -19,6 +19,7 @@ from .schemas import (
     SkillResource,
     ToolCallRecord,
 )
+from pelgo.logging import log
 
 _USER_ID = "pelgo-system"
 
@@ -63,8 +64,11 @@ class AgentRunner:
         trace = AgentTrace()
         llm_call_count = 0
         final_result = None
+        run_start = time.monotonic()
 
         pending_call_times: dict[str, float] = {}
+
+        log("job_start", job_id=job_id, candidate=candidate_profile.name)
 
         import os as _os
         _debug = _os.getenv("PELGO_DEBUG") == "1"
@@ -97,6 +101,7 @@ class AgentRunner:
 
             for fc in event.get_function_calls():
                 pending_call_times[fc.id] = time.monotonic()
+                log("tool_call_start", job_id=job_id, tool=fc.name)
 
             for fr in event.get_function_responses():
                 start = pending_call_times.pop(fr.id, time.monotonic())
@@ -112,9 +117,16 @@ class AgentRunner:
                 )
                 if status == "error":
                     trace.fallbacks_triggered += 1
+                log("tool_call_end", job_id=job_id, tool=fr.name, status=status, latency_ms=latency_ms,
+                    level="error" if status == "error" else "info")
 
             if event.usage_metadata:
                 llm_call_count += 1
+                meta = event.usage_metadata
+                log("llm_usage", job_id=job_id, llm_call_n=llm_call_count,
+                    prompt_tokens=getattr(meta, "prompt_token_count", None),
+                    candidates_tokens=getattr(meta, "candidates_token_count", None),
+                    total_tokens=getattr(meta, "total_token_count", None))
 
             if event.is_final_response() and event.content and final_result is None:
                 raw_text = _extract_text(event)
@@ -137,8 +149,14 @@ class AgentRunner:
                 # triggers GeneratorExit which corrupts the async context chain.
 
         trace.total_llm_calls = llm_call_count
+        total_ms = int((time.monotonic() - run_start) * 1000)
         if final_result is not None:
+            log("job_complete", job_id=job_id, status="completed",
+                score=final_result.overall_score, confidence=final_result.confidence,
+                total_llm_calls=trace.total_llm_calls, fallbacks=trace.fallbacks_triggered,
+                total_ms=total_ms)
             return final_result
+        log("job_complete", job_id=job_id, status="failed", total_ms=total_ms, level="warn")
         return _empty_result(job_id, trace)
 
 
