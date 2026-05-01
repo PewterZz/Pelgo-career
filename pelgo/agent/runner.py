@@ -84,10 +84,16 @@ class AgentRunner:
                         if hasattr(p, "text") and p.text:
                             parts_summary.append(f"text={p.text[:80]!r}")
                         elif hasattr(p, "function_call") and p.function_call:
-                            parts_summary.append(f"fc={p.function_call.name}")
+                            fc_args_str = json.dumps(p.function_call.args)[:200]
+                            parts_summary.append(f"fc={p.function_call.name} args={fc_args_str}")
                         elif hasattr(p, "function_response") and p.function_response:
-                            parts_summary.append(f"fr={p.function_response.name}")
-                print(f"[event] author={event.author} final={event.is_final_response()} parts=[{', '.join(parts_summary)}]", flush=True)
+                            fr_resp_str = json.dumps(p.function_response.response)[:300]
+                            parts_summary.append(f"fr={p.function_response.name} resp={fr_resp_str}")
+                no_content = not event.content or not event.content.parts
+                print(f"[event] author={event.author} final={event.is_final_response()} content={'EMPTY' if no_content else 'ok'} parts=[{', '.join(parts_summary)}]", flush=True)
+                if event.is_final_response() and no_content:
+                    attrs = {k: v for k, v in vars(event).items() if k in ("finish_reason", "error_code", "error_message") and v is not None}
+                    print(f"[event] WARNING: empty final event — agent stopped. {attrs}", flush=True)
 
             for fc in event.get_function_calls():
                 pending_call_times[fc.id] = time.monotonic()
@@ -148,8 +154,9 @@ def _state_event(state: AgentState):
 
 
 def _build_message(profile: CandidateProfile, jd_input: str) -> str:
+    profile_json = profile.model_dump_json(indent=2, exclude={"raw_text"})
     return (
-        f"Candidate profile:\n{profile.model_dump_json(indent=2)}\n\n"
+        f"Candidate profile:\n{profile_json}\n\n"
         f"Job description:\n{jd_input}"
     )
 

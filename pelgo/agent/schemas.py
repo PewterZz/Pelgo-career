@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class WorkEntry(BaseModel):
@@ -43,8 +43,16 @@ class DimensionScores(BaseModel):
 class SkillResource(BaseModel):
     title: str
     url: str
-    estimated_hours: int
-    type: Literal["course", "project", "cert", "doc"]
+    estimated_hours: int = 10
+    type: Literal["course", "project", "cert", "doc", "search"] = "doc"
+
+    @field_validator("estimated_hours", mode="before")
+    @classmethod
+    def coerce_hours(cls, v: object) -> int:
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 10
 
 
 class PrioritizedSkill(BaseModel):

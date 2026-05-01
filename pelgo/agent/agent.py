@@ -80,8 +80,11 @@ def build_agent() -> LlmAgent:
     ]
     return LlmAgent(
         name="career_intelligence_agent",
-        model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+        model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
         instruction=SYSTEM_PROMPT,
         tools=tools,
-        generate_content_config=genai_types.GenerateContentConfig(temperature=0.0),
+        generate_content_config=genai_types.GenerateContentConfig(
+            temperature=0.0,
+            thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
+        ),
     )

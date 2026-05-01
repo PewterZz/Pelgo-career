@@ -19,6 +19,8 @@ from .schemas import JDRequirements, PrioritizedSkill, SkillResource
 _TOOL_TIMEOUT_SEC = float(os.getenv("TOOL_TIMEOUT_SEC", "30"))
 _RESEARCH_TIMEOUT_SEC = float(os.getenv("RESEARCH_TIMEOUT_SEC", "15"))
 
+_RESOURCE_CACHE: dict[tuple[str, str], dict] = {}
+
 
 def _require_env(name: str) -> str:
     val = os.getenv(name)
@@ -119,10 +121,23 @@ async def score_candidate_against_requirements(
     jd_completeness = len(required_skills) / 10 (capped at 1.0)
     match_ratio = len(matched_skills) / max(len(required_skills), 1)
     """
+    import os as _os, sys as _sys
+    if _os.getenv("PELGO_DEBUG") == "1":
+        print(f"[score] profile[:200]={str(candidate_profile_json)[:200]!r}", file=_sys.stderr, flush=True)
+        print(f"[score] reqs[:200]={str(requirements_json)[:200]!r}", file=_sys.stderr, flush=True)
     try:
         profile = json.loads(candidate_profile_json)
         requirements = json.loads(requirements_json)
+        # Unwrap model-side envelope: {"extract_jd_requirements_response": {...}}
+        if isinstance(requirements, dict) and "extract_jd_requirements_response" in requirements:
+            requirements = requirements["extract_jd_requirements_response"]
+        if isinstance(requirements, dict) and "required_skills" not in requirements:
+            for v in requirements.values():
+                if isinstance(v, dict) and "required_skills" in v:
+                    requirements = v
+                    break
     except json.JSONDecodeError as exc:
+        print(f"[score] JSON PARSE ERROR: {exc}", file=_sys.stderr, flush=True)
         return {"error": f"JSON parse failed: {exc}"}
 
     candidate_skills_lower = [s.lower() for s in profile.get("skills", [])]
@@ -186,6 +201,8 @@ async def score_candidate_against_requirements(
         "matched_skills": matched,
         "gap_skills": gap,
     }
+    if _os.getenv("PELGO_DEBUG") == "1":
+        print(f"[score] result={json.dumps(result)}", file=_sys.stderr, flush=True)
     tool_context.state["scoring_result"] = result
     return result
 
@@ -200,6 +217,14 @@ async def research_skill_resources(
     Makes a real external call to the Coursera public API, falling back to
     DuckDuckGo Instant Answers if Coursera is unavailable.
     """
+    cache_key = (skill_name.lower(), seniority_context)
+    if cache_key in _RESOURCE_CACHE:
+        cached = _RESOURCE_CACHE[cache_key]
+        existing = tool_context.state.get("researched_resources", {})
+        existing[skill_name] = cached["resources"]
+        tool_context.state["researched_resources"] = existing
+        return cached
+
     resources: list[dict] = []
 
     try:
@@ -259,6 +284,7 @@ async def research_skill_resources(
         })
 
     result = {"skill": skill_name, "resources": resources}
+    _RESOURCE_CACHE[cache_key] = result
     existing = tool_context.state.get("researched_resources", {})
     existing[skill_name] = resources
     tool_context.state["researched_resources"] = existing
