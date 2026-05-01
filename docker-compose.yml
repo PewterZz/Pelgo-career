@@ -1,0 +1,80 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: pelgo
+      POSTGRES_PASSWORD: pelgo
+      POSTGRES_DB: pelgo
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pelgo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build: .
+    command: alembic upgrade head
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pelgo:pelgo@postgres:5432/pelgo
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+
+  seed:
+    build: .
+    command: python scripts/seed.py
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pelgo:pelgo@postgres:5432/pelgo
+    env_file:
+      - .env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: on-failure
+
+  api:
+    build: .
+    command: uvicorn pelgo.api.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pelgo:pelgo@postgres:5432/pelgo
+    env_file:
+      - .env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  worker-1:
+    build: .
+    command: python -m pelgo.worker
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pelgo:pelgo@postgres:5432/pelgo
+      WORKER_CONCURRENCY: "2"
+    env_file:
+      - .env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  worker-2:
+    build: .
+    command: python -m pelgo.worker
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pelgo:pelgo@postgres:5432/pelgo
+      WORKER_CONCURRENCY: "2"
+    env_file:
+      - .env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  postgres_data:
