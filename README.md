@@ -1,5 +1,7 @@
 # Pelgo — AI-First Career Intelligence Agent
 
+total time taken = 9h 8min
+
 full prompts are located in the /prompts folder
 
 ---
