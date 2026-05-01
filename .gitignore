@@ -1,5 +1,7 @@
 .env
 .claude
 .pytest_cache
+.venv/
+__pycache__/
 
 *.pdf
