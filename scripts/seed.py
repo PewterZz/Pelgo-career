@@ -1,4 +1,7 @@
-"""Insert a sample candidate and two match jobs for demo and manual testing."""
+"""Insert a sample candidate and two match jobs for demo and manual testing.
+
+Idempotent: skips if the sample candidate already exists.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -7,13 +10,18 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from sqlalchemy import select
+
 from pelgo.agent.schemas import CandidateProfile
+from pelgo.db.models import Candidate
 from pelgo.db.repository import create_candidate, create_match_jobs
 from pelgo.db.session import AsyncSessionLocal
 
+SAMPLE_EMAIL = "jane@example.com"
+
 SAMPLE_PROFILE = CandidateProfile(
     name="Jane Smith",
-    email="jane@example.com",
+    email=SAMPLE_EMAIL,
     skills=["python", "fastapi", "postgresql", "docker", "kubernetes"],
     years_experience=7.0,
     seniority_level="senior",
@@ -41,6 +49,14 @@ SAMPLE_JDS = [
 
 
 async def main() -> None:
+    async with AsyncSessionLocal() as session:
+        existing = await session.execute(
+            select(Candidate).where(Candidate.email == SAMPLE_EMAIL)
+        )
+        if existing.scalar_one_or_none() is not None:
+            print("Seed data already exists, skipping.")
+            return
+
     async with AsyncSessionLocal() as session:
         candidate = await create_candidate(session, SAMPLE_PROFILE)
         print(f"Seeded candidate: {candidate.candidate_id}  ({candidate.name})")
