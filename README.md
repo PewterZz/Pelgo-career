@@ -34,6 +34,32 @@ open http://localhost:8001
 
 This starts PostgreSQL, runs migrations, seeds sample data, launches the API and two background workers. The seed script creates a sample candidate and two match jobs that the workers will pick up automatically.
 
+### Optional — using Vertex AI instead of AI Studio
+
+If you'd rather authenticate via GCP (e.g. you already use `gcloud` and don't want to issue an AI Studio key), the agent and `_gemini_extract` helpers honour the standard `GOOGLE_GENAI_USE_VERTEXAI` switch.
+
+```bash
+# 1. Authenticate locally — creates ~/.config/gcloud/application_default_credentials.json
+gcloud auth application-default login
+
+# 2. Set Vertex flags in .env
+GOOGLE_GENAI_USE_VERTEXAI=1
+GOOGLE_CLOUD_PROJECT=your-gcp-project-id
+GOOGLE_CLOUD_LOCATION=global   # or us-central1, etc.
+# GOOGLE_API_KEY can be left blank in this mode
+
+# 3. Mount the ADC file into each container so the SDK can find it.
+#    Add this to api / worker-1 / worker-2 in docker-compose.yml:
+#    environment:
+#      GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcloud/application_default_credentials.json
+#    volumes:
+#      - ~/.config/gcloud/application_default_credentials.json:/tmp/gcloud/application_default_credentials.json:ro
+
+docker compose up --build
+```
+
+The default `docker-compose.yml` ships configured for AI Studio (no mount, just `GOOGLE_API_KEY`) so a fresh clone runs with one command. Switch to Vertex only if you have a project with the Generative Language API or Vertex AI API enabled and adequate quota for `gemini-2.5-flash`.
+
 ---
 
 ## Quick Start — CLI only (Part A)
