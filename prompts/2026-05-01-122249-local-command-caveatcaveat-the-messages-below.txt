@@ -1,0 +1,734 @@
+╭─── Claude Code v2.1.126 ─────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting        │
+│                 Welcome back Peter!                │ started                 │
+│                                                    │ Run /init to create a … │
+│                       ▐▛███▜▌                      │ ─────────────────────── │
+│                      ▝▜█████▛▘                     │ What's new              │
+│                        ▘▘ ▝▝                       │ The `/model` picker no… │
+│ Sonnet 4.6 · Claude Max · peterns1609@gmail.com's  │ - Added `claude projec… │
+│ Organization                                       │ `--dangerously-skip-pe… │
+│                  ~/Projects/Pelgo                  │ /release-notes for more │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+❯ /clear                                                                        
+  ⎿  (no content)
+
+❯ in pelgo/agent/tools Define at least four tools the agent can call. Below are 
+   the required tools and one optional                                          
+  stretch. You may add more — document every tool you implement.                
+                                                                                
+  Required tools                                                                
+                                                                                
+  Tool 1  extract_jd_requirements(job_url_or_text)                              
+  Returns  Structured object: required_skills[], nice_to_have_skills[],         
+  seniority_level, domain, responsibilities[]                                   
+  Notes  Must handle both raw text and URL input. If a URL is provided, fetch   
+  and parse the                                                                 
+  page. Schema-validate the output before returning.                            
+                                                                                
+  Tool 2  score_candidate_against_requirements(candidate_profile,               
+  requirements)                                                                 
+  Returns  overall_score (0–100), dimension_scores {skills, experience,         
+  seniority_fit}, matched_skills[], gap_skills[], confidence                    
+  (low|medium|high)                                                             
+  Notes  The agent calls this after extract_jd_requirements. If confidence is   
+  low, the agent                                                                
+  should decide whether to gather more signal before finalising the score.      
+  Confidence                                                                    
+  must be derived from detectable signals — e.g. JD completeness, ratio of      
+  required                                                                      
+  skills matched, domain distance between candidate and role — not asserted     
+  arbitrarily. Document your confidence heuristic in the README.                
+                                                                                
+  Tool 3  research_skill_resources(skill_name, seniority_context)               
+  Returns  resources[]: {title, url, estimated_hours, type                      
+  (course|project|cert|doc)}, relevance_score                                   
+  Notes  Must make at least one real external call — web search, a curated      
+  knowledge base, or                                                            
+  a course API.                                                                 
+                                                                                
+  Tool 4  prioritise_skill_gaps(gap_skills[], job_market_context)               
+                                                                                
+  Returns  Ranked list: {skill, priority_rank, estimated_match_gain_pct,        
+  rationale}                                                                    
+  Notes  Ranking must be reasoned, not alphabetical. The agent calls this to    
+  decide which skills                                                           
+  to research first — it should not blindly research all gaps.                  
+                                                                                
+  Stretch tool — Google ADK (optional, weighted heavily if attempted)           
+                                                                                
+  If you have experience with Google Agent Development Kit (ADK), implement one 
+   of the above tools                                                           
+  as an ADK tool and wire it into your agent graph using ADK’s orchestration    
+  primitives.                                                                   
+    add and scaffold these tools for the google-adk agent                       
+
+⏺ Let me look at the current project structure before planning anything.
+
+  Searched for 1 pattern, read 3 files, recalled 1 memory (ctrl+o to expand)
+
+⏺ Now let me read the remaining files.
+
+  Read 3 files (ctrl+o to expand)
+
+⏺ Let me check the remaining files before planning the implementation.
+
+  Read 3 files (ctrl+o to expand)
+
+⏺ Advising using Opus 4.7
+  ⎿  ✔ Advisor has reviewed the conversation and will apply the feedback 
+     (ctrl+o to expand)
+
+⏺ Good news: the four required tools are already fully implemented in
+  pelgo/agent/tools.py:47-314 and wired into the LlmAgent in agent.py:74-79.
+  What's missing is the stretch ADK tool — which the assignment says is
+  "weighted heavily." I'll implement research_skill_resources as a proper ADK
+  sub-agent using AgentTool, which is the ADK orchestration primitive that makes
+   this genuinely multi-agent.
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Now I'll implement the stretch. The plan:
+  - Add two internal fetch functions (_coursera_search, _ddg_search) as pure
+  async tools
+  - Wire them into an LlmAgent sub-agent
+  - Expose it via AgentTool — ADK's orchestration primitive for multi-agent
+  graphs
+  - Swap it into build_agent() replacing the plain FunctionTool version
+
+⏺ Update(pelgo/agent/tools.py)
+  ⎿  Added 2 lines
+       8  from urllib.parse import quote_plus
+       9  
+      10  import httpx
+      11 +from google.adk.agents import LlmAgent                         
+      12 +from google.adk.tools import AgentTool, FunctionTool           
+      13  from google.adk.tools.tool_context import ToolContext
+      14  from pydantic import ValidationError
+      15  
+
+⏺ Now add the stretch tool implementation at the end of tools.py:
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Update(pelgo/agent/tools.py)
+  ⎿  Added 91 lines
+      314      serialized = [p.model_dump() for p in prioritized]
+      315      tool_context.state["prioritized_gaps"] = serialized
+      316      return {"prioritized_skills": serialized}
+      317 +                                                              
+      318 +                                                              
+      319 +# ── Stretch: ADK AgentTool — research sub-agent ─────────────
+          +──────────────────                                            
+      320 +# research_skill_resources is re-implemented here as an ADK Ll
+          +mAgent sub-agent                                              
+      321 +# wired into the main orchestrator via AgentTool. The parent a
+          +gent calls                                                    
+      322 +# research_skill_resources(request="...") and ADK routes execu
+          +tion to the                                                   
+      323 +# sub-agent, which uses its own FunctionTools to fetch and cur
+          +ate results.                                                  
+      324 +                                                              
+      325 +                                                              
+      326 +async def _coursera_search(skill_name: str) -> dict[str, Any]:
+      327 +    """Fetch up to 5 Coursera courses matching skill_name via 
+          +the public API."""                                            
+      328 +    results: list[dict] = []                                  
+      329 +    try:                                                      
+      330 +        async with httpx.AsyncClient(timeout=_RESEARCH_TIMEOUT
+          +_SEC) as client:                                              
+      331 +            resp = await client.get(                          
+      332 +                "https://api.coursera.org/api/courses.v1",    
+      333 +                params={"q": "search", "query": skill_name, "l
+          +imit": 5},                                                    
+      334 +            )                                                 
+      335 +            if resp.status_code == 200:                       
+      336 +                for course in resp.json().get("elements", []):
+      337 +                    slug = course.get("slug", "")             
+      338 +                    results.append({                          
+      339 +                        "title": course.get("name", skill_name
+          +),                                                            
+      340 +                        "url": f"https://www.coursera.org/lear
+          +n/{slug}",                                                    
+      341 +                        "estimated_hours": 20,                
+      342 +                        "type": "course",                     
+      343 +                        "relevance_score": 0.85,              
+      344 +                    })                                        
+      345 +    except Exception:                                         
+      346 +        pass                                                  
+      347 +    return {"results": results}                               
+      348 +                                                              
+      349 +                                                              
+      350 +async def _ddg_search(skill_name: str, seniority_context: str 
+          += "mid") -> dict[str, Any]:                                   
+      351 +    """Search DuckDuckGo Instant Answers for learning resource
+          +s."""                                                         
+      352 +    results: list[dict] = []                                  
+      353 +    try:                                                      
+      354 +        async with httpx.AsyncClient(timeout=_RESEARCH_TIMEOUT
+          +_SEC) as client:                                              
+      355 +            resp = await client.get(                          
+      356 +                "https://api.duckduckgo.com/",                
+      357 +                params={                                      
+      358 +                    "q": f"learn {skill_name} {seniority_conte
+          +xt} tutorial course",                                         
+      359 +                    "format": "json",                         
+      360 +                    "no_html": "1",                           
+      361 +                    "no_redirect": "1",                       
+      362 +                },                                            
+      363 +            )                                                 
+      364 +            if resp.status_code == 200:                       
+      365 +                for topic in resp.json().get("RelatedTopics", 
+          +[])[:5]:                                                      
+      366 +                    if isinstance(topic, dict) and topic.get("
+          +FirstURL"):                                                   
+      367 +                        results.append({                      
+      368 +                            "title": topic.get("Text", skill_n
+          +ame)[:120],                                                   
+      369 +                            "url": topic["FirstURL"],         
+      370 +                            "estimated_hours": 10,            
+      371 +                            "type": "doc",                    
+      372 +                            "relevance_score": 0.6,           
+      373 +                        })                                    
+      374 +    except Exception:                                         
+      375 +        pass                                                  
+      376 +    return {"results": results}                               
+      377 +                                                              
+      378 +                                                              
+      379 +_SKILL_RESEARCH_SUB_AGENT = LlmAgent(                         
+      380 +    name="research_skill_resources",                          
+      381 +    model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),      
+      382 +    instruction="""\                                          
+      383 +You are a Skill Resource Researcher. When called with a reques
+          +t specifying a skill                                          
+      384 +name and seniority level:                                     
+      385 +1. Call coursera_search to find relevant courses for that skil
+          +l.                                                            
+      386 +2. If coursera_search returns an empty results list, call ddg_
+          +search as a fallback.                                         
+      387 +3. Curate and rank the resources by relevance_score. Adjust re
+          +levance_score (0.0–1.0)                                       
+      388 +   based on how well each resource fits the seniority level an
+          +d skill specificity.                                          
+      389 +4. If no resources are found from either source, emit a single
+          + Google search fallback.                                      
+      390 +5. Return ONLY a valid JSON object — no extra text:           
+      391 +{                                                             
+      392 +  "skill": "<skill_name>",                                    
+      393 +  "resources": [                                              
+      394 +    {                                                         
+      395 +      "title": "...",                                         
+      396 +      "url": "...",                                           
+      397 +      "estimated_hours": <int>,                               
+      398 +      "type": "course|project|cert|doc",                      
+      399 +      "relevance_score": <float 0.0-1.0>                      
+      400 +    }                                                         
+      401 +  ]                                                           
+      402 +}                                                             
+      403 +""",                                                          
+      404 +    tools=[FunctionTool(_coursera_search), FunctionTool(_ddg_s
+          +earch)],                                                      
+      405 +)                                                             
+      406 +                                                              
+      407 +research_skill_resources_adk = AgentTool(agent=_SKILL_RESEARCH
+          +_SUB_AGENT)                                                   
+
+⏺ Now update agent.py to import and wire in the ADK tool:
+
+⏺ Update(pelgo/agent/agent.py)
+  ⎿  Added 1 line, removed 1 line
+       8  from .tools import (
+       9      extract_jd_requirements,
+      10      prioritise_skill_gaps,
+      11 -    research_skill_resources,                                  
+      11 +    research_skill_resources_adk,                              
+      12      score_candidate_against_requirements,
+      13  )
+      14  
+
+⏺ Update(pelgo/agent/agent.py)
+  ⎿  Added 1 line, removed 1 line
+      74      tools = [
+      75          FunctionTool(extract_jd_requirements),
+      76          FunctionTool(score_candidate_against_requirements),
+      77 -        FunctionTool(research_skill_resources),                
+      77 +        research_skill_resources_adk,  # AgentTool: routes to t
+         +he research sub-agent                                          
+      78          FunctionTool(prioritise_skill_gaps),
+      79      ]
+      80      return LlmAgent(
+
+⏺ Now verify the files look correct:
+
+⏺ Bash(/opt/anaconda3/bin/python -c "from pelgo.agent.tools import
+      research_skill_resources_adk; print(type(research_skill_resources_adk));
+      print(research_skill_resour…)
+  ⎿  <class 'google.adk.tools.agent_tool.AgentTool'>
+     research_skill_resources
+
+⏺ Bash(/opt/anaconda3/bin/python -c "from pelgo.agent.agent import build_agent;
+      a = build_agent(); print([t.name for t in a.tools])")
+  ⎿  ['extract_jd_requirements', 'score_candidate_against_requirements', 'r
+     esearch_skill_resources', 'prioritise_skill_gaps']
+
+⏺ All 4 tools are wired in. The research_skill_resources slot is now served by
+  the ADK AgentTool. Run the smoke tests to confirm nothing broke:
+
+⏺ Bash(/opt/anaconda3/bin/python -m pytest tests/ -v 2>&1)
+  ⎿  ============================= test session starts ====================
+     ==========
+     platform darwin -- Python 3.12.4, pytest-9.0.2, pluggy-1.6.0 -- /opt/a
+     … +17 lines (ctrl+o to expand)
+⏺ 4/4 passing. Here's the full picture of what's in place:
+
+  ---
+  Tools already implemented (unchanged)
+
+  ┌──────────────────────────────────────┬──────────────┬───────────────┐
+  │                 Tool                 │     File     │ ADK primitive │
+  ├──────────────────────────────────────┼──────────────┼───────────────┤
+  │ extract_jd_requirements              │ tools.py:48  │ FunctionTool  │
+  ├──────────────────────────────────────┼──────────────┼───────────────┤
+  │ score_candidate_against_requirements │ tools.py:105 │ FunctionTool  │
+  ├──────────────────────────────────────┼──────────────┼───────────────┤
+  │ prioritise_skill_gaps                │ tools.py:258 │ FunctionTool  │
+  └──────────────────────────────────────┴──────────────┴───────────────┘
+
+  Stretch tool added
+
+  research_skill_resources is now backed by a dedicated LlmAgent sub-agent
+  (_SKILL_RESEARCH_SUB_AGENT) wired into the parent via AgentTool — ADK's
+  multi-agent orchestration primitive. When the parent calls
+  research_skill_resources(request="..."), ADK routes execution to the
+  sub-agent, which runs its own tool loop (Coursera API → DuckDuckGo fallback)
+  before returning curated JSON. The function-based implementation stays in
+  tools.py for backwards compatibility with tests.
+
+  How the tool graph looks at runtime:
+  career_intelligence_agent (LlmAgent)
+  ├── extract_jd_requirements        (FunctionTool)
+  ├── score_candidate_against_requirements (FunctionTool)
+  ├── research_skill_resources       (AgentTool)
+  │   └── _SKILL_RESEARCH_SUB_AGENT (LlmAgent)
+  │       ├── _coursera_search       (FunctionTool)
+  │       └── _ddg_search            (FunctionTool)
+  └── prioritise_skill_gaps          (FunctionTool)
+
+✻ Brewed for 4m 39s
+
+❯ /export                                                                       
+  ⎿  Conversation exported to: /Users/petersubrata/Projects/Pelgo/2026-05-01-120
+     345-local-command-caveatcaveat-the-messages-below.txt
+
+❯ why coursera or ddg                                                           
+
+⏺ Two reasons:
+
+  Coursera — has a free, unauthenticated public search endpoint
+  (api.coursera.org/api/courses.v1) that returns structured data (slug, name)
+  without an API key. Most course platforms (Udemy, LinkedIn Learning,
+  Pluralsight) require auth. Coursera doesn't for basic search.
+
+  DuckDuckGo Instant Answers — also free, no key, no rate limit for light usage.
+   The assignment says "at least one real external call" — DDG is the standard
+  no-auth fallback for web search in projects like this. It's not great
+  (RelatedTopics is noisy), but it degrades gracefully to the Google search link
+   when it returns nothing useful.
+
+  The assignment spec just says "web search, a curated knowledge base, or a
+  course API." If you have a preference — e.g. Google Custom Search (needs a key
+   but is much better), SerpAPI, or a hardcoded curated list of resources per
+  skill — I can swap it out. The two-layer fallback structure stays the same
+  regardless of which APIs fill the slots.
+
+✻ Brewed for 8s
+
+❯ can we do linked in, github, huggingface, or other job screening websites as  
+  well                                                                          
+
+⏺ Here's the honest breakdown by feasibility:
+
+  Can add (free, no auth):
+  - GitHub — api.github.com/search/repositories — great for finding
+  awesome-<skill> lists and tutorial repos, returns structured data with star
+  counts for relevance scoring
+  - HuggingFace — huggingface.co/api/datasets?search=<skill> and known course
+  URLs (NLP Course, Diffusion Course, etc.) — most useful for ML/AI skills
+  specifically
+
+  Can't add without credentials:
+  - LinkedIn — Learning API requires OAuth approval from LinkedIn. Their public
+  API is completely gated and scraping violates their ToS. Not feasible without
+  an API key you apply for.
+
+  "Job screening websites" — what do you mean here? These are typically job
+  boards (Indeed, Glassdoor) not learning resources. If you mean platforms
+  candidates use to demonstrate skills during hiring, candidates includes:
+  - Kaggle (data science — has courses at kaggle.com/learn, no public search API
+   though)
+  - HackerRank (coding challenges — no public API)
+
+  ---
+  I'd add GitHub + HuggingFace as two additional fetch functions in the
+  sub-agent alongside Coursera and DuckDuckGo. The sub-agent's LLM layer then
+  curates across all four sources and ranks by relevance.
+
+  Want me to go ahead with GitHub + HuggingFace? And can you clarify what you
+  mean by "job screening websites" — do you mean somewhere specific you have in
+  mind?
+
+✻ Cogitated for 37s
+
+❯ does the assignment explicitly say where its implied to be hosted, can we do  
+  a automated browser for linked in on a authenticated account and just let the 
+   agent browse from there                                                      
+
+⏺ Let me check the assignment PDF and the prompts for any hosting context.
+
+  Read 1 file, recalled 1 memory (ctrl+o to expand)
+
+⏺ Two separate answers:
+
+  On hosting — no, the assignment doesn't specify a cloud host. Submission is:
+  push to a public GitHub repo, docker-compose up must start cleanly. Evaluators
+   run it locally. No deployment required.
+
+  On LinkedIn browser automation — I'd skip it, for three concrete reasons
+  specific to this assignment:
+
+  1. The evaluator can't run it. The submission says docker-compose up starts
+  cleanly. An authenticated LinkedIn session means your credentials need to be
+  present. They won't be. The tool will silently fail or crash their evaluation
+  run.
+  2. Public GitHub repo + scraping code is a liability. The submission goes to a
+   public repo. LinkedIn automation code (even without hardcoded creds) is a ToS
+   violation. Pelgo is a career platform — they almost certainly have or want a
+  LinkedIn partnership. Seeing scraping code in a candidate's submission is a
+  bad signal.
+  3. It doesn't score extra points. The rubric credits "real external call"
+  under Tool design (20 pts). Coursera already satisfies that. The stretch
+  points (10 pts) are for ADK tool registration, session management, and event
+  streaming — which is already done.
+
+  What would actually impress them for research_skill_resources:
+
+  GitHub and HuggingFace are both free, unauthenticated, and evaluator-runnable:
+
+  - GitHub (api.github.com/search/repositories?q=awesome+{skill}) — returns
+  curated awesome-* lists with star counts, which are genuinely high-quality
+  learning resources
+  - HuggingFace (huggingface.co/api/models?search={skill}) — relevant for ML/AI
+  skills, shows domain awareness
+
+  The evaluation rubric also mentions caching under Tool design — "caching
+  implemented" is explicitly listed as what great looks like. That's probably a
+  higher-ROI addition than LinkedIn.
+
+  Want me to add GitHub + HuggingFace sources and a simple in-memory cache to
+  research_skill_resources?
+
+✻ Cogitated for 33s
+
+❯ is linked in learning the same                                                
+
+⏺ No, but it has a different problem. LinkedIn Learning (formerly Lynda.com) is
+  LinkedIn's course platform — so it's relevant content (actual courses). But:
+
+  - It requires the same OAuth 2.0 + approved LinkedIn Developer application as
+  the main LinkedIn API — no free unauthenticated endpoint
+  - Most content is behind a subscription paywall, so even if you auth, API
+  responses for unauthenticated/non-subscriber users are limited
+  - Same public-repo / docker-compose problem: evaluators would need your OAuth
+  tokens to run it
+
+  So same authentication barrier, different content. Not easier to integrate.
+
+  The closest free equivalent to "LinkedIn Learning but actually accessible" is
+  YouTube Data API v3 — it requires a free API key (Google Cloud Console, no
+  approval process, generous quota) and has a massive catalog of tech tutorials.
+   If you have a YOUTUBE_API_KEY in .env, it's runnable by evaluators who set
+  the key. That said, it adds a setup step to the README.
+
+  For zero-friction evaluation (no keys needed): stick with GitHub +
+  HuggingFace. Want me to add those two now?
+
+✻ Cogitated for 17s
+
+❯ so right now the users uploads their resume, the agent evaluates their        
+  skillset and gaps, scores it then uses coursera,ddg, and soon to be github    
+  and huggingface for personalized roadmaps to getting a job they want ?        
+
+⏺ Yes, exactly. The full flow:
+
+  Resume PDF → CandidateProfile (skills, years, seniority, domain)
+       +
+  Job Description (URL or text) → extract_jd_requirements
+                                        ↓
+                           score_candidate_against_requirements
+                           (overall score, matched skills, gaps, confidence)
+                                        ↓
+                           prioritise_skill_gaps
+                           (ranked by what closes the gap fastest)
+                                        ↓
+                           research_skill_resources (top 3 gaps only)
+                           Coursera → GitHub → HuggingFace → DuckDuckGo
+                                        ↓
+                                MatchResult JSON
+                           (score + personalized learning plan)
+
+  The one thing to add: right now it's CLI only (python -m pelgo --resume 
+  foo.pdf --jd "..."). Part B of the assignment is what turns this into a real
+  product — FastAPI endpoints, PostgreSQL to store results, background workers
+  so the agent runs out-of-process, and a minimal frontend for upload + polling
+  results.
+
+  So the vision is: candidate uploads resume on the frontend → picks a job they
+  want → gets back a score and a week-by-week learning roadmap from real
+  courses. That's the product.
+
+  Want to add GitHub + HuggingFace to the research tool now, or jump to Part B?
+
+✻ Crunched for 15s
+
+❯ yes add github and hugginface, then write a proper readme with setup          
+  instructions, the full agent system prompt and some choices for frameworks    
+
+⏺ I'll add GitHub and HuggingFace to the research sub-agent and write the README
+   in parallel.
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Now I'll make all the edits in parallel — add the two new fetch functions to
+  tools.py, update the sub-agent, and write the README.
+
+⏺ Update(pelgo/agent/tools.py)
+  ⎿  Added 106 lines, removed 10 lines
+      347      return {"results": results}
+      348  
+      349  
+      350 +async def _github_search(skill_name: str) -> dict[str, Any]:  
+      351 +    """Search GitHub for awesome lists and tutorial repos for 
+          +a skill.                                                      
+      352 +                                                              
+      353 +    Uses the unauthenticated public API (60 req/hr). Set GITHU
+          +B_TOKEN in .env                                               
+      354 +    to raise the limit to 5 000 req/hr.                       
+      355 +    """                                                       
+      356 +    results: list[dict] = []                                  
+      357 +    headers = {"Accept": "application/vnd.github+json"}       
+      358 +    token = os.getenv("GITHUB_TOKEN")                         
+      359 +    if token:                                                 
+      360 +        headers["Authorization"] = f"Bearer {token}"          
+      361 +    try:                                                      
+      362 +        async with httpx.AsyncClient(timeout=_RESEARCH_TIMEOUT
+          +_SEC) as client:                                              
+      363 +            resp = await client.get(                          
+      364 +                "https://api.github.com/search/repositories", 
+      365 +                params={                                      
+      366 +                    "q": f"awesome {skill_name} learning tutor
+          +ial",                                                         
+      367 +                    "sort": "stars",                          
+      368 +                    "order": "desc",                          
+      369 +                    "per_page": 5,                            
+      370 +                },                                            
+      371 +                headers=headers,                              
+      372 +            )                                                 
+      373 +            if resp.status_code == 200:                       
+      374 +                for repo in resp.json().get("items", []):     
+      375 +                    stars = repo.get("stargazers_count", 0)   
+      376 +                    results.append({                          
+      377 +                        "title": repo.get("full_name", skill_n
+          +ame),                                                         
+      378 +                        "url": repo.get("html_url", ""),      
+      379 +                        "estimated_hours": 15,                
+      380 +                        "type": "project",                    
+      381 +                        "relevance_score": round(min(0.5 + sta
+          +rs / 100_000, 0.95), 2),                                      
+      382 +                    })                                        
+      383 +    except Exception:                                         
+      384 +        pass                                                  
+      385 +    return {"results": results}                               
+      386 +                                                              
+      387 +                                                              
+      388 +_HF_KNOWN_COURSES: dict[str, tuple[str, str, int]] = {        
+      389 +    "nlp": ("HuggingFace NLP Course", "https://huggingface.co/
+          +learn/nlp-course", 30),                                       
+      390 +    "transformers": ("HuggingFace NLP Course", "https://huggin
+          +gface.co/learn/nlp-course", 30),                              
+      391 +    "diffusion": ("HuggingFace Diffusion Models Course", "http
+          +s://huggingface.co/learn/diffusion-course", 20),              
+      392 +    "reinforcement learning": ("HuggingFace Deep RL Course", "
+          +https://huggingface.co/learn/deep-rl-course", 40),            
+      393 +    "deep rl": ("HuggingFace Deep RL Course", "https://hugging
+          +face.co/learn/deep-rl-course", 40),                           
+      394 +    "audio": ("HuggingFace Audio Course", "https://huggingface
+          +.co/learn/audio-course", 15),                                 
+      395 +    "computer vision": ("HuggingFace CV Course", "https://hugg
+          +ingface.co/learn/computer-vision-course", 20),                
+      396 +}                                                             
+      397 +                                                              
+      398 +                                                              
+      399 +async def _huggingface_search(skill_name: str) -> dict[str, An
+          +y]:                                                           
+      400 +    """Search HuggingFace for datasets and check known free co
+          +urse URLs."""                                                 
+      401 +    results: list[dict] = []                                  
+      402 +                                                              
+      403 +    skill_lower = skill_name.lower()                          
+      404 +    for keyword, (title, url, hours) in _HF_KNOWN_COURSES.item
+          +s():                                                          
+      405 +        if keyword in skill_lower:                            
+      406 +            results.append({                                  
+      407 +                "title": title,                               
+      408 +                "url": url,                                   
+      409 +                "estimated_hours": hours,                     
+      410 +                "type": "course",                             
+      411 +                "relevance_score": 0.95,                      
+      412 +            })                                                
+      413 +            break                                             
+      414 +                                                              
+      415 +    try:                                                      
+      416 +        async with httpx.AsyncClient(timeout=_RESEARCH_TIMEOUT
+          +_SEC) as client:                                              
+      417 +            resp = await client.get(                          
+      418 +                "https://huggingface.co/api/datasets",        
+      419 +                params={"search": skill_name, "limit": 4},    
+      420 +            )                                                 
+      421 +            if resp.status_code == 200:                       
+      422 +                for ds in resp.json():                        
+      423 +                    ds_id = ds.get("id", "")                  
+      424 +                    if ds_id:                                 
+      425 +                        results.append({                      
+      426 +                            "title": f"Dataset: {ds_id}",     
+      427 +                            "url": f"https://huggingface.co/da
+          +tasets/{ds_id}",                                              
+      428 +                            "estimated_hours": 8,             
+      429 +                            "type": "doc",                    
+      430 +                            "relevance_score": 0.7,           
+      431 +                        })                                    
+      432 +    except Exception:                                         
+      433 +        pass                                                  
+      434 +                                                              
+      435 +    return {"results": results}                               
+      436 +                                                              
+      437 +                                                              
+      438  async def _ddg_search(skill_name: str, seniority_context: str 
+           = "mid") -> dict[str, Any]:
+      351 -    """Search DuckDuckGo Instant Answers for learning resource
+          -s."""                                                         
+      439 +    """Search DuckDuckGo Instant Answers for learning resource
+          +s (last-resort fallback)."""                                  
+      440      results: list[dict] = []
+      441      try:
+      442          async with httpx.AsyncClient(timeout=_RESEARCH_TIMEOUT
+           _SEC) as client:
+     ...
+      468      name="research_skill_resources",
+      469      model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+      470      instruction="""\
+      383 -You are a Skill Resource Researcher. When called with a reques
+          -t specifying a skill                                          
+      384 -name and seniority level:                                     
+      385 -1. Call coursera_search to find relevant courses for that skil
+          -l.                                                            
+      386 -2. If coursera_search returns an empty results list, call ddg_
+          -search as a fallback.                                         
+      387 -3. Curate and rank the resources by relevance_score. Adjust re
+          -levance_score (0.0–1.0)                                       
+      388 -   based on how well each resource fits the seniority level an
+          -d skill specificity.                                          
+      389 -4. If no resources are found from either source, emit a single
+          - Google search fallback.                                      
+      390 -5. Return ONLY a valid JSON object — no extra text:           
+      471 +You are a Skill Resource Researcher. Given a request with a sk
+          +ill name and seniority level:                                 
+      472 +                                                              
+      473 +1. Call coursera_search — structured online courses.          
+      474 +2. Call github_search — curated awesome lists and tutorial rep
+          +os ranked by GitHub stars.                                    
+      475 +3. Call huggingface_search — free HuggingFace courses (best fo
+          +r ML/AI skills) and datasets.                                 
+      476 +4. If all three return empty results, call ddg_search as a las
+          +t-resort fallback.                                            
+      477 +5. Merge, deduplicate by URL, and rank all results by relevanc
+          +e_score descending.                                           
+      478 +   Adjust relevance_score (0.0–1.0) upward for resources that 
+          +closely match the                                             
+      479 +   seniority level and downward for generic or off-topic resul
+          +ts.                                                           
+      480 +6. Return ONLY a valid JSON object — no prose before or after:
+      481  {
+      482    "skill": "<skill_name>",
+      483    "resources": [
+     ...
+      490      }
+      491    ]
+      492  }
+      493 +If no resources are found from any source, include one Google 
+          +search fallback resource.                                     
+      494  """,
+      404 -    tools=[FunctionTool(_coursera_search), FunctionTool(_ddg_s
+          -earch)],                                                      
+      495 +    tools=[                                                   
+      496 +        FunctionTool(_coursera_search),                       
+      497 +        FunctionTool(_github_search),                         
+      498 +        FunctionTool(_huggingface_search),                    
+      499 +        FunctionTool(_ddg_search),                            
+      500 +    ],                                                        
+      501  )
+      502  
+      503  research_skill_resources_adk = AgentTool(agent=_SKILL_RESEARCH
+           _SUB_AGENT)
+
+⏺ Now write the README:
+
+⏺ Write(README.md)
+  ⎿  Wrote 263 lines to README.md
+      2 # Pelgo — AI-First Career Intelligence Agent
+      3 A multi-agent system that scores a candidate's resume against a j
+        ob description and produces a prioritised, resource-backed learni
+      4 ng plan to close the gap.
+      5 ---
+      6 
+      8 ## Quick Start (Part A — Agent only)
+      9 **Prerequisites:** Python 3.12, conda (or any venv), a Google Clo
+        ud project with Vertex AI enabled **or** a Google AI Studio API k
+        ey.
+     … +378 lines (ctrl+o to expand)
+
+⏺ Now verify everything still imports and tests pass:
+
+⏺ Bash(/opt/anaconda3/bin/python -c "
+      from pelgo.agent.tools import (…)  ⎿  Tools: ['extract_jd_requirements', 'score_candidate_against_requiremen
+     ts', 'research_skill_resources', 'prioritise_skill_gaps']
+     Research sub-agent tools: ['_coursera_search', '_github_search', '_hug
+     … +16 lines (ctrl+o to expand)
+
+⏺ All good. Here's what changed:
+
+  tools.py — the research sub-agent now has 4 fetch tools:
+  - _coursera_search — structured courses (no auth)
+  - _github_search — awesome lists + tutorial repos ranked by GitHub stars;
+  respects GITHUB_TOKEN if set for higher rate limits
+  - _huggingface_search — checks known free HF course URLs first (NLP,
+  Diffusion, Deep RL, Audio, CV), then queries the datasets API; best for ML/AI
+  skills
+  - _ddg_search — last-resort fallback only
+
+  The sub-agent's instruction now tells it to call all three primary sources,
+  merge + deduplicate by URL, and only fall back to DuckDuckGo if all three are
+  empty.
+
+  README.md — covers everything the assignment grading rubric checks:
+  - Setup in under 5 minutes, env var table
+  - Full architecture diagram
+  - Framework choice with one-sentence justification + alternatives table
+  - All 4 tools documented with return schemas
+  - Full system prompt verbatim
+  - Confidence heuristic with the exact formula
+  - All 3 failure modes (timeout, invalid output, low confidence)
+  - Trade-offs table including the LinkedIn decision
+
+✻ Churned for 2m 53s
+
+※ recap: Building an AI career agent that scores resumes against job descriptions and generates learning plans. Added GitHub and HuggingFace as resource sources and wrote the README. Next: implement Part B — FastAPI, PostgreSQL, workers, and docker-compose. (disable recaps in /config)
