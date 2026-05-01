@@ -4,6 +4,7 @@ import os
 
 from google.adk.agents import LlmAgent
 from google.adk.tools import FunctionTool
+from google.genai import types as genai_types
 
 from .tools import (
     extract_jd_requirements,
@@ -82,4 +83,5 @@ def build_agent() -> LlmAgent:
         model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
         instruction=SYSTEM_PROMPT,
         tools=tools,
+        generate_content_config=genai_types.GenerateContentConfig(temperature=0.0),
     )

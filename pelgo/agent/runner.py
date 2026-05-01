@@ -62,8 +62,12 @@ class AgentRunner:
         message = _build_message(candidate_profile, jd_input)
         trace = AgentTrace()
         llm_call_count = 0
+        final_result = None
 
         pending_call_times: dict[str, float] = {}
+
+        import os as _os
+        _debug = _os.getenv("PELGO_DEBUG") == "1"
 
         async for event in self._runner.run_async(
             user_id=_USER_ID,
@@ -73,6 +77,18 @@ class AgentRunner:
                 parts=[types.Part(text=message)],
             ),
         ):
+            if _debug:
+                parts_summary = []
+                if event.content and event.content.parts:
+                    for p in event.content.parts:
+                        if hasattr(p, "text") and p.text:
+                            parts_summary.append(f"text={p.text[:80]!r}")
+                        elif hasattr(p, "function_call") and p.function_call:
+                            parts_summary.append(f"fc={p.function_call.name}")
+                        elif hasattr(p, "function_response") and p.function_response:
+                            parts_summary.append(f"fr={p.function_response.name}")
+                print(f"[event] author={event.author} final={event.is_final_response()} parts=[{', '.join(parts_summary)}]", flush=True)
+
             for fc in event.get_function_calls():
                 pending_call_times[fc.id] = time.monotonic()
 
@@ -94,21 +110,29 @@ class AgentRunner:
             if event.usage_metadata:
                 llm_call_count += 1
 
-            if event.is_final_response() and event.content:
+            if event.is_final_response() and event.content and final_result is None:
                 raw_text = _extract_text(event)
-                trace.total_llm_calls = llm_call_count
-                result = _parse_and_validate(raw_text, job_id, trace)
+                # Only capture if the response contains JSON — intermediate text
+                # events (LLM "thinking" steps) have no braces and must be skipped
+                # so the agent can continue calling tools and produce real output.
+                if "{" in raw_text and "}" in raw_text:
+                    trace.total_llm_calls = llm_call_count
+                    final_result = _parse_and_validate(raw_text, job_id, trace)
 
-                session_obj = await self._session_service.get_session(
-                    app_name="pelgo",
-                    user_id=_USER_ID,
-                    session_id=session_id,
-                )
-                agent_state_dict = session_obj.state if session_obj else {}
-                _enrich_result_from_state(result, agent_state_dict)
-                return result
+                    session_obj = await self._session_service.get_session(
+                        app_name="pelgo",
+                        user_id=_USER_ID,
+                        session_id=session_id,
+                    )
+                    agent_state_dict = session_obj.state if session_obj else {}
+                    _enrich_result_from_state(final_result, agent_state_dict)
+                # Do NOT return here — let the generator exhaust itself so ADK's
+                # ContextVar context managers can detach cleanly. Returning early
+                # triggers GeneratorExit which corrupts the async context chain.
 
         trace.total_llm_calls = llm_call_count
+        if final_result is not None:
+            return final_result
         return _empty_result(job_id, trace)
 
 
@@ -137,16 +161,25 @@ def _extract_text(event) -> str:
 
 
 def _parse_and_validate(raw_text: str, job_id: str, trace: AgentTrace) -> MatchResult:
-    json_start = raw_text.find("{")
-    json_end = raw_text.rfind("}")
+    # Strip markdown code fences the LLM sometimes wraps around JSON
+    text = raw_text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1]
+    if text.endswith("```"):
+        text = text.rsplit("```", 1)[0]
+
+    json_start = text.find("{")
+    json_end = text.rfind("}")
     if json_start == -1 or json_end == -1:
         return _empty_result(job_id, trace)
     try:
-        data = json.loads(raw_text[json_start: json_end + 1])
+        data = json.loads(text[json_start: json_end + 1])
         data["job_id"] = job_id
         data["agent_trace"] = trace.model_dump()
         return MatchResult.model_validate(data)
-    except Exception:
+    except Exception as exc:
+        import sys
+        print(f"[parse_error] {type(exc).__name__}: {exc}", file=sys.stderr)
         return _empty_result(job_id, trace)
 
 

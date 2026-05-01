@@ -11,6 +11,7 @@ import httpx
 from google.adk.agents import LlmAgent
 from google.adk.tools import AgentTool, FunctionTool
 from google.adk.tools.tool_context import ToolContext
+from google.genai import types as genai_types
 from pydantic import ValidationError
 
 from .schemas import JDRequirements, PrioritizedSkill, SkillResource
@@ -29,7 +30,6 @@ def _require_env(name: str) -> str:
 def _gemini_extract(prompt: str) -> str:
     """Call Gemini to get a JSON string back."""
     from google import genai
-    from google.genai import types as genai_types
 
     client = genai.Client(
         vertexai=True,
@@ -41,6 +41,7 @@ def _gemini_extract(prompt: str) -> str:
         contents=prompt,
         config=genai_types.GenerateContentConfig(
             response_mime_type="application/json",
+            temperature=0.0,
         ),
     )
     return response.text
@@ -74,11 +75,11 @@ async def extract_jd_requirements(
 
     prompt = f"""Extract a structured job description from the text below.
 Return ONLY a JSON object with these exact keys:
-- required_skills: list of required technical skills
-- nice_to_have_skills: list of preferred but optional skills
+- required_skills: list of short skill/technology names only (e.g. "Python", "LangChain", "RAG", "FastAPI", "PostgreSQL"). Do NOT include experience requirements like "3+ years of X" — extract just the skill name "X". Do NOT include soft skills or vague requirements.
+- nice_to_have_skills: same format, for preferred but optional skills
 - seniority_level: one of junior/mid/senior/lead/staff/principal
-- domain: primary technical domain (e.g. "backend engineering", "data science")
-- responsibilities: list of 3-7 key responsibilities
+- domain: primary technical domain (e.g. "backend engineering", "data science", "AI engineering")
+- responsibilities: list of 3-7 key responsibilities as short phrases
 
 Job description:
 {raw_text[:6000]}
@@ -124,13 +125,21 @@ async def score_candidate_against_requirements(
     except json.JSONDecodeError as exc:
         return {"error": f"JSON parse failed: {exc}"}
 
-    candidate_skills_lower = {s.lower() for s in profile.get("skills", [])}
+    candidate_skills_lower = [s.lower() for s in profile.get("skills", [])]
     required = requirements.get("required_skills", [])
     nice_to_have = requirements.get("nice_to_have_skills", [])
-    all_required_lower = {s.lower() for s in required}
 
-    matched = [s for s in required if s.lower() in candidate_skills_lower]
-    gap = [s for s in required if s.lower() not in candidate_skills_lower]
+    def _skill_matches(jd_skill: str) -> bool:
+        jd = jd_skill.lower().rstrip("s")  # strip plural
+        for cs in candidate_skills_lower:
+            cs_stem = cs.rstrip("s")
+            # match if either is a substring of the other (handles "llm"↔"llms", "gcp"↔"vertex ai/gcp")
+            if jd in cs_stem or cs_stem in jd:
+                return True
+        return False
+
+    matched = [s for s in required if _skill_matches(s)]
+    gap = [s for s in required if not _skill_matches(s)]
 
     jd_completeness = min(len(required) / 10.0, 1.0)
     match_ratio = len(matched) / max(len(required), 1)
@@ -467,6 +476,7 @@ async def _ddg_search(skill_name: str, seniority_context: str = "mid") -> dict[s
 _SKILL_RESEARCH_SUB_AGENT = LlmAgent(
     name="research_skill_resources",
     model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+    generate_content_config=genai_types.GenerateContentConfig(temperature=0.0),
     instruction="""\
 You are a Skill Resource Researcher. Given a request with a skill name and seniority level:
 
