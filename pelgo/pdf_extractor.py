@@ -33,10 +33,11 @@ def _gemini_seniority(text: str) -> str:
     from google import genai
     from google.genai import types as genai_types
 
+    use_vertex = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "0") == "1"
     client = genai.Client(
-        vertexai=bool(os.getenv("GOOGLE_GENAI_USE_VERTEXAI")),
-        project=os.getenv("GOOGLE_CLOUD_PROJECT"),
-        location=os.getenv("GOOGLE_CLOUD_LOCATION", "global"),
+        vertexai=use_vertex,
+        project=os.getenv("GOOGLE_CLOUD_PROJECT") if use_vertex else None,
+        location=os.getenv("GOOGLE_CLOUD_LOCATION", "global") if use_vertex else None,
     )
     prompt = f"""Classify the professional seniority level of this candidate.
 

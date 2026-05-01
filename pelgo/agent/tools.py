@@ -33,10 +33,11 @@ def _gemini_extract(prompt: str) -> str:
     """Call Gemini to get a JSON string back."""
     from google import genai
 
+    use_vertex = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "0") == "1"
     client = genai.Client(
-        vertexai=True,
-        project=os.getenv("GOOGLE_CLOUD_PROJECT"),
-        location=os.getenv("GOOGLE_CLOUD_LOCATION", "global"),
+        vertexai=use_vertex,
+        project=os.getenv("GOOGLE_CLOUD_PROJECT") if use_vertex else None,
+        location=os.getenv("GOOGLE_CLOUD_LOCATION", "global") if use_vertex else None,
     )
     response = client.models.generate_content(
         model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
