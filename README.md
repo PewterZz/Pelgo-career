@@ -4,9 +4,39 @@ full prompts are located in the /prompts folder
 
 ---
 
-## Quick Start (Part A — Agent only)
+## Assumptions 
 
-**Prerequisites:** Python 3.12, conda (or any venv), a Google Cloud project with Vertex AI enabled **or** a Google AI Studio API key.
+- 1. tool-call sequence: Always extract -> score -> prioritise -> research (top 3 only). Each step needs the previous step's output, so there's no parallelism to exploit.
+- 2. When to stop: Once we have a score (confidence >= medium, or one retry exhausted), prioritised gaps, and researched the top 3 skills it emits the final JSON.
+- 3. What counts as a failed tool call: timeouts, schema violations, and empty results are all failures. Timeouts skip and move on, schema errors retry once, empty results downgrade confidence. Nothing crashes the run.
+- 4. JD caching: each candidate run extracts the job description independently. Skill resource lookups are cached per worker process so repeated skills aren't re-fetched.
+- 5. Candidate profile fields: skills, years_experience, seniority_level, domain, work_history, education. Scoring uses skills for match ratio, years for experience, seniority for fit, and domain for a confidence penalty on cross-domain transitions.
+
+---
+
+## Quick Start — Full Stack (docker compose)
+
+**Prerequisites:** Docker, Docker Compose, a Google AI Studio API key (or GCP credentials for Vertex AI).
+
+```bash
+# 1. Configure credentials
+cp .env.example .env
+# Edit .env — set GOOGLE_API_KEY (required)
+
+# 2. Start everything
+docker compose up --build
+
+# 3. Open the frontend
+open http://localhost:8001
+```
+
+This starts PostgreSQL, runs migrations, seeds sample data, launches the API and two background workers. The seed script creates a sample candidate and two match jobs that the workers will pick up automatically.
+
+---
+
+## Quick Start — CLI only (Part A)
+
+**Prerequisites:** Python 3.12, conda (or any venv), a Google AI Studio API key.
 
 ```bash
 # 1. Clone and create env
@@ -38,6 +68,9 @@ python -m pelgo --resume path/to/resume.pdf --jd "We are hiring a senior Python 
 | `TOOL_TIMEOUT_SEC` | No | `30` | Timeout for JD fetch and scoring tools. |
 | `RESEARCH_TIMEOUT_SEC` | No | `15` | Timeout per resource-search API call. |
 | `GITHUB_TOKEN` | No | — | GitHub PAT. Raises rate limit from 60 to 5 000 req/hr. |
+| `DATABASE_URL` | Yes (Part B) | — | PostgreSQL connection string. Set automatically in docker-compose. |
+| `WORKER_CONCURRENCY` | No | `2` | Number of async worker tasks per worker process. |
+| `POLL_INTERVAL_SEC` | No | `1.0` | How often workers poll for pending jobs (seconds). |
 
 ---
 
@@ -95,6 +128,14 @@ PDF extraction is pre-agent — it runs before the LLM is invoked and its output
 | CrewAI | Role-based abstraction is a poor fit — this is one orchestrator, not a crew. |
 | AutoGen | Conversational multi-agent model doesn't map cleanly to a single-run, structured-output use case. |
 | Custom ReAct loop | Maximum control, but re-implements session state, event streaming, and tool registration that ADK provides. |
+
+### Google ADK Stretch — What ADK Provides
+
+Since ADK is the primary framework, every tool benefits from ADK primitives. Three capabilities were critical:
+
+1. **`FunctionTool` + `AgentTool` registration** — tools are registered once and the orchestrator handles argument marshalling and invocation. `research_skill_resources` is an `AgentTool` wrapping a dedicated `LlmAgent` sub-agent, giving real multi-agent composition with zero custom routing code.
+2. **`InMemorySessionService` for typed state** — session state (`tool_errors`, `low_confidence_retries`, scoring results) persists across tool calls within a run, managed by ADK rather than a global variable or manual dict passing.
+3. **Event streaming** — the `Runner.run_async()` event stream emits `FunctionCall` and `FunctionResponse` events in real time, allowing `agent_trace` to be populated by the orchestrator from actual execution events rather than asking the LLM to self-report. This is what makes the trace verifiable.
 
 ---
 
@@ -274,6 +315,100 @@ Fields covered: `job_id`, `tool` name, call `status` (success/error), `latency_m
 
 ---
 
-## Part B — Status
+## Part B — Async Infrastructure
 
-Part B (FastAPI, PostgreSQL, background workers, docker-compose, frontend) is not yet implemented. The agent runs end-to-end via CLI. The submission checklist items for Part B will be added before the deadline.
+### B1 — API Surface
+
+FastAPI application (`pelgo/api/main.py`) with four core endpoints and one admin endpoint:
+
+| Endpoint | Method | Behaviour |
+|---|---|---|
+| `/api/v1/candidate` | POST | Accepts `multipart/form-data` (PDF resume) or `application/json` (resume text). Parses, extracts structured profile, stores in PostgreSQL. Returns `candidate_id`, `name`, `seniority_level`, `domain`, `years_experience`, `skills`. |
+| `/api/v1/matches` | POST | Accepts `candidate_id` and up to 10 JDs (text or URL). Creates one `MatchJob` per JD with `status: pending`. Returns immediately with job IDs. |
+| `/api/v1/matches/{id}` | GET | Returns status and full structured agent output (including `agent_trace`) for one job. Status: `pending | processing | completed | failed`. |
+| `/api/v1/matches` | GET | Paginated list of match jobs. Filterable by `status`. Requires `limit` and `offset`. |
+| `/api/v1/admin/matches/{job_id}/requeue` | POST | Resets a failed job to `pending`, zeros `attempt_count`, clears `error_detail`. |
+
+---
+
+### B2 — Background Workers
+
+Workers run out-of-process via `python -m pelgo.worker` (separate containers in docker-compose).
+
+- **Concurrency:** `docker-compose.yml` starts two worker containers (`worker-1`, `worker-2`), each running `WORKER_CONCURRENCY=2` async tasks — 4 concurrent workers total.
+- **Race-condition-safe claiming:** `claim_next_job()` uses `SELECT FOR UPDATE SKIP LOCKED` to atomically claim one pending job. No duplicate processing.
+- **Failure isolation:** Each job runs in a `try/except` — a failed agent run logs the error and marks the job accordingly without crashing the worker or blocking other jobs.
+- **Dead-letter after 3 attempts:** `mark_failed()` checks `attempt_count >= 3`. If so, sets `status: failed` with `error_detail` and partial `agent_trace`. Otherwise resets to `pending` for retry.
+- **Stuck job recovery:** On startup, `reset_stuck_jobs()` resets any job stuck in `processing` for over 10 minutes (handles crashed workers).
+- **Polling interval:** Configurable via `POLL_INTERVAL_SEC` (default 1 s).
+
+---
+
+### B3 — Data Model
+
+PostgreSQL 16 with Alembic migrations (`alembic/versions/0001_initial_schema.py`).
+
+**`candidates` table:**
+
+| Column | Type | Notes |
+|---|---|---|
+| `candidate_id` | UUID PK | Auto-generated |
+| `name` | String | Required |
+| `email` | String | Optional, indexed |
+| `seniority_level` | String | e.g. "senior", "mid" |
+| `domain` | String | e.g. "backend", "data science" |
+| `years_experience` | Float | |
+| `skills` | JSONB | List of skill strings |
+| `education` | JSONB | Structured education entries |
+| `work_history` | JSONB | Structured work entries |
+| `raw_text` | Text | Original resume text |
+| `created_at` | DateTime | Indexed |
+
+**`match_jobs` table:**
+
+| Column | Type | Notes |
+|---|---|---|
+| `job_id` | UUID PK | Auto-generated |
+| `candidate_id` | UUID FK | Indexed |
+| `jd_input` | Text | Raw JD text or URL |
+| `status` | String | Check constraint: `pending | processing | completed | failed`. Indexed with `created_at` and `updated_at`. |
+| `attempt_count` | Integer | Tracks retries (dead-letter at 3) |
+| `processing_started_at` | DateTime | Set on claim, used for stuck-job detection |
+| `error_detail` | Text | Error message on failure |
+| `result` | JSONB | Full `MatchResult` including `agent_trace` |
+| `created_at` | DateTime | |
+| `updated_at` | DateTime | |
+
+**Queryable by design:** all jobs for a candidate (`idx_match_jobs_candidate_id`), all jobs by status (`idx_match_jobs_status_created`), and `agent_trace` for a specific job (`result->'agent_trace'`).
+
+---
+
+### Docker Compose — Full Stack
+
+```bash
+docker compose up --build
+```
+
+Starts the entire system with one command:
+
+| Service | Role |
+|---|---|
+| `postgres` | PostgreSQL 16 with health check |
+| `migrate` | Runs `alembic upgrade head`, exits on success |
+| `seed` | Runs `scripts/seed.py` (sample candidate + 2 JDs), exits on success |
+| `api` | FastAPI on port 8001 (maps to 8000 inside container) |
+| `worker-1` | Background worker (2 concurrent tasks) |
+| `worker-2` | Background worker (2 concurrent tasks) |
+
+The seed script creates a sample candidate (Jane Smith, 7 years, senior backend engineer) and two match jobs with different JDs.
+
+---
+
+### Frontend
+
+Single-page app served at `/` via FastAPI's `StaticFiles` (`static/index.html`).
+
+Three tabs:
+1. **Upload Resume** — PDF upload or paste raw text. Calls `POST /api/v1/candidate`.
+2. **Match Jobs** — Submit JDs for a candidate. Displays jobs table with status badges.
+3. **Results** — Match cards with overall score, dimension score bars, learning plan, and expandable agent trace. Polls for updates while jobs are pending/processing.

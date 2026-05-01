@@ -46,8 +46,11 @@ services:
       - "8001:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://pelgo:pelgo@postgres:5432/pelgo
+      GOOGLE_APPLICATION_CREDENTIALS: /gcp/application_default_credentials.json
     env_file:
       - .env
+    volumes:
+      - ~/.config/gcloud/application_default_credentials.json:/gcp/application_default_credentials.json:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
